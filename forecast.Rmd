@@ -20,7 +20,7 @@ library(stars)
 First, we define some constants.
 
 ```{r}
-shp_file <- "shp/bfa_admbnda_adm2_igb_20200323.shp"
+shp_file <- "shp/bfa_admbnda_adm3_igb_20200323.shp"
 forecast_input_tiff <- "plot_ensemble_median_total_rainfall.tiff"
 output_filename <- "12 au 11 juin 2022 - tmap.png"
 ```
@@ -50,13 +50,13 @@ If this is not acceptable, we can adjust the `style = "quantile"` argument
 to adjust the raster styling. We can also manually set breaks and a palette.
 
 ```{r}
-map <- tm_shape(st_as_stars(bfa_forecast)) + 
+tm_shape(st_as_stars(bfa_forecast)) + 
   tm_raster(
     title = "Quantités de pluie (mm)",
     palette = "Blues",
     style = "quantile"
   ) +
-tm_shape(st_as_sf(boundaries)) +
+  tm_shape(st_as_sf(boundaries)) +
   tm_borders(col = "black") +
   tm_text(
     text = "ADM2_FR",
@@ -89,5 +89,44 @@ Save it to a file:
 
 ```{r}
 tmap_save(map, output_filename)
+```
+
+Testing w/ Centre-Nord
+
+```{r}
+cn_vect <- boundaries[boundaries$ADM1_FR == "Centre-Nord"]
+cn_rast <- terra::crop(forecast, cn_vect, snap = "out")
+cn_rast <- terra::mask(cn_rast, cn_vect, touches = TRUE)
+
+cn_map <- tm_shape(st_as_stars(cn_rast)) + 
+  tm_raster(
+    title = "Quantités de pluie (mm)",
+    palette = "Blues",
+    style = "quantile"
+  ) +
+  tm_shape(st_as_sf(cn_vect)) +
+  tm_borders(col = "black") +
+  tm_text(
+    text = "ADM3_FR",
+    col = "red",
+    size = 0.8
+  ) +
+  tm_compass(
+    type = "rose",
+    show.labels = 2,
+    position = c("left", "top"),
+    size = 4
+  ) +
+  tm_scale_bar(position = c("center", "bottom")) +
+  tm_graticules(alpha = 0) +
+  tm_layout(
+    main.title = "Total pluviométrique en Centre-Nord du 12 Mai 2022 au 11 Juin 2022",
+    main.title.fontface = "bold",
+    main.title.position = "center",
+    legend.position = c("left", "bottom"),
+    inner.margins = 0.06
+  )
+
+cn_map
 ```
 
