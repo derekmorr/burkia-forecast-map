@@ -12,7 +12,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r load libraries, message=FALSE, warning=FALSE, include=FALSE}
 library(terra)
 library(tmap)
-library(sf)
 library(stars)
 ```
 
@@ -36,17 +35,9 @@ First, we crop the forecast GeoTIFF to Burkina Faso. We use the
 forecast <- rast(forecast_input_tiff)
 boundaries <- vect(shp_file)
 
-# name of a temp file
-bf_map_cropped <- "forecast-cropped.tif"
-
 # crop the forecast GeoTIFF to BFA boundaries
 bfa_forecast <- terra::crop(forecast, boundaries, snap = "out")
 bfa_forecast <- terra::mask(bfa_forecast, boundaries)
-
-# save a temp copy of the cropped GeoTIFF for tmap
-terra::writeRaster(bfa_forecast, bf_map_cropped, overwrite = TRUE)
-
-rm(boundaries, forecast, bfa_forecast)
 ```
 
 # TMAP
@@ -54,37 +45,26 @@ rm(boundaries, forecast, bfa_forecast)
 The [tmap package](https://r-tmap.github.io/tmap/) has many tools for making 
 beautiful maps programatically.
 
-Unfortunately, `tmap` does not yet support the `terra` data directly.
-That's why we had to save the temporary copy of the cropped GeoTIFF.
-First, we have to load in the data again.
-
-```{r include=FALSE}
-boundaries <- st_read(shp_file)
-bfa_forecast <- read_stars(bf_map_cropped)
-```
-
-Now we build the map using `tmap`.
-
 A note on styling. I chose a built-in blue-scale color palette and quantile
 styling. This was a quick way to approximate the original map from Romaric.
 If this is not acceptable, we can adjust the `style = "quantile"` argument 
 to adjust the raster styling. We can also manually set breaks and a palette.
 
 ```{r}
-map <- tm_shape(bfa_forecast) + 
+map <- tm_shape(st_as_stars(bfa_forecast)) + 
   tm_raster(
-    title = "Quantités de pluie",
+    title = "Quantités de pluie (mm)",
     palette = "Blues",
     style = "quantile"
   ) +
-tm_shape(boundaries) +
-  tm_borders() +
+tm_shape(st_as_sf(boundaries)) +
+  tm_borders(col = "black") +
   tm_text(
     text = "ADM2_FR",
     col = "red",
     size = 0.6
   ) +
-  #tm_scale_bar() +
+  tm_scale_bar() +
   tm_compass(
     type = "rose",
     show.labels = 2,
