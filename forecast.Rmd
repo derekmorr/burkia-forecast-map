@@ -36,8 +36,7 @@ forecast <- rast(forecast_input_tiff)
 boundaries <- vect(shp_file)
 
 # crop the forecast GeoTIFF to BFA boundaries
-bfa_forecast <- terra::crop(forecast, boundaries, snap = "out")
-bfa_forecast <- terra::mask(bfa_forecast, boundaries)
+bfa_forecast <- terra::crop(forecast, boundaries, snap = "out", mask = TRUE)
 ```
 
 # TMAP
@@ -64,7 +63,6 @@ tm_shape(st_as_sf(boundaries)) +
     col = "red",
     size = 0.6
   ) +
-  tm_scale_bar() +
   tm_compass(
     type = "rose",
     show.labels = 2,
