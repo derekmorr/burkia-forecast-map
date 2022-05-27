@@ -13,6 +13,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library(terra)
 library(tmap)
 library(stars)
+library(glue)
+library(purrr)
+library(dplyr)
 ```
 
 # Constants
@@ -20,9 +23,21 @@ library(stars)
 First, we define some constants.
 
 ```{r}
-shp_file <- "shp/bfa_admbnda_adm3_igb_20200323.shp"
+output_dir <- "c:/users/derek/Documents/burkina-forecat-map/output"
+adm1_file <- "shp/bfa_admbnda_adm1_igb_20200323.shp"
+adm2_file <- "shp/bfa_admbnda_adm2_igb_20200323.shp"
+adm3_file <- "shp/bfa_admbnda_adm3_igb_20200323.shp"
+prov_capitals_file <- "new_data/Bf_prov.shp"
 forecast_input_tiff <- "plot_ensemble_median_total_rainfall.tiff"
-output_filename <- "12 au 11 juin 2022 - tmap.png"
+output_filename <- "bf_rainfall_forecast_2022-05-26-to-2022-06-26.png"
+```
+
+Make the output directory, if necessary.
+
+```{r}
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
 ```
 
 
@@ -32,11 +47,15 @@ First, we crop the forecast GeoTIFF to Burkina Faso. We use the
 [R terra package](https://rspatial.github.io/terra/) to do this.
 
 ```{r}
-forecast <- rast(forecast_input_tiff)
-boundaries <- vect(shp_file)
+forecast <- rast(forecast_input_tiff, lyrs = 1)
+adm1 <- vect(adm1_file)
+adm2 <- vect(adm2_file)
+adm3 <- vect(adm3_file)
+prov_capitals <- vect(prov_capitals_file)
 
 # crop the forecast GeoTIFF to BFA boundaries
-bfa_forecast <- terra::crop(forecast, boundaries, snap = "out", mask = TRUE)
+bfa_forecast <- terra::mask(forecast, adm1, touches = TRUE)
+bfa_forecast <- terra::crop(bfa_forecast, adm1, snap = "out")
 ```
 
 # TMAP
@@ -44,22 +63,24 @@ bfa_forecast <- terra::crop(forecast, boundaries, snap = "out", mask = TRUE)
 The [tmap package](https://r-tmap.github.io/tmap/) has many tools for making 
 beautiful maps programatically.
 
+## Whole Country Map
+
 A note on styling. I chose a built-in blue-scale color palette and quantile
 styling. This was a quick way to approximate the original map from Romaric.
 If this is not acceptable, we can adjust the `style = "quantile"` argument 
 to adjust the raster styling. We can also manually set breaks and a palette.
 
 ```{r}
-tm_shape(st_as_stars(bfa_forecast)) + 
+country_map <- tm_shape(st_as_stars(bfa_forecast)) + 
   tm_raster(
     title = "Quantités de pluie (mm)",
     palette = "Blues",
     style = "quantile"
   ) +
-  tm_shape(st_as_sf(boundaries)) +
+  tm_shape(st_as_sf(prov_capitals)) +
   tm_borders(col = "black") +
   tm_text(
-    text = "ADM2_FR",
+    text = "CHF_LIEU",
     col = "red",
     size = 0.6
   ) +
@@ -71,7 +92,7 @@ tm_shape(st_as_stars(bfa_forecast)) +
   ) +
   tm_graticules(alpha = 0) +
   tm_layout(
-    main.title = "Total pluviométrique du 12 Mai 2022 au 11 Juin 2022",
+    main.title = "Total pluviométrique\ndu 26 Mai 2022 au 26 Juin 2022",
     main.title.fontface = "bold",
     main.title.position = "center",
     legend.position = c("right", "bottom"),
@@ -82,51 +103,109 @@ tm_shape(st_as_stars(bfa_forecast)) +
 Manually inspect the map:
 
 ```{r}
-map
+country_map
 ```
 
 Save it to a file:
 
 ```{r}
-tmap_save(map, output_filename)
+tmap_save(country_map, glue("{output_dir}/{output_filename}"))
 ```
 
-Testing w/ Centre-Nord
+
+# Per-region maps
 
 ```{r}
-cn_vect <- boundaries[boundaries$ADM1_FR == "Centre-Nord"]
-cn_rast <- terra::crop(forecast, cn_vect, snap = "out")
-cn_rast <- terra::mask(cn_rast, cn_vect, touches = TRUE)
+mk_region_map <- function(region) {
+  region_vect <- adm3[adm3$ADM1_FR == region]
+  
+  # Sahel needs special handling for cropping & masking.
+  if (region != "Sahel") {
+    input_raster <- forecast
+  } else{
+    input_raster <- bfa_forecast
+  }
 
-cn_map <- tm_shape(st_as_stars(cn_rast)) + 
-  tm_raster(
-    title = "Quantités de pluie (mm)",
-    palette = "Blues",
-    style = "quantile"
-  ) +
-  tm_shape(st_as_sf(cn_vect)) +
-  tm_borders(col = "black") +
-  tm_text(
-    text = "ADM3_FR",
-    col = "red",
-    size = 0.8
-  ) +
-  tm_compass(
-    type = "rose",
-    show.labels = 2,
-    position = c("left", "top"),
-    size = 4
-  ) +
-  tm_scale_bar(position = c("center", "bottom")) +
-  tm_graticules(alpha = 0) +
-  tm_layout(
-    main.title = "Total pluviométrique en Centre-Nord du 12 Mai 2022 au 11 Juin 2022",
-    main.title.fontface = "bold",
-    main.title.position = "center",
-    legend.position = c("left", "bottom"),
-    inner.margins = 0.06
+  region_raster <- terra::mask(input_raster, region_vect, touches = TRUE)
+  region_raster <- terra::crop(region_raster, region_vect, snap = "out")
+  
+  special_compass_regions <- c(
+    "Centre", "Centre-Est", "Centre-Ouest", "Hauts-Bassins"
   )
+  if (region %in% special_compass_regions) {
+    compass_position <- c("right", "top")
+  } else {
+    compass_position <- c("left", "bottom")
+  }
+  #compass_position <- if_else(
+  #  region %in% special_compass_regions, 
+  #  c("right", "top"),
+  #  c("left", "bottom")
+  #)
+  
+  special_scale_bar_regions <- c(
+    "Cascades", "Centre", "Est", "Hauts-Bassins", "Nord"
+  )
+  if (region %in% special_scale_bar_regions) {
+    scale_bar_position <- c("right", "bottom")
+  } else {
+    scale_bar_position <- c("center", "bottom")
+  }
+  #scale_bar_position <- if_else(
+  #  region %in% special_scale_bar_regions,
+  #  c("right", "bottom"),
+  #  c("center", "bottom")
+  #)
+  
+  map <- tm_shape(st_as_stars(region_raster)) + 
+    tm_raster(
+      title = "Quantités de pluie (mm)",
+      palette = "Blues",
+      style = "quantile"
+    ) +
+    tm_shape(st_as_sf(region_vect)) +
+    tm_borders(col = "black") +
+    tm_text(
+      text = "ADM3_FR",
+      col = "red",
+      size = 0.5
+    ) +
+    tm_compass(
+      type = "rose",
+      show.labels = 2,
+      position = compass_position,
+      size = 2
+    ) +
+    tm_scale_bar(position = scale_bar_position) +
+    tm_graticules(alpha = 0) +
+    tm_layout(
+      main.title = glue("Total pluviométrique en {region}\n26 Mai 2022 au 26 Juin 2022"), 
+      main.title.fontface = "bold",
+      main.title.position = "center",
+      legend.outside.position = c("right", "center"),
+      legend.outside = TRUE,
+      inner.margins = 0.1
+    )
+  
+  map
+}
+```
 
-cn_map
+```{r}
+regions <- sort(unique(adm3$ADM1_FR))
+region_maps <- regions |> map(mk_region_map)
+```
+
+broken regions:
+
+Sahel, 
+
+```{r}
+for (i in 1:length(regions)) {
+  region <- regions[i]
+  map <- region_maps[[i]]
+  print(glue("writing {region} map"))
+  tmap_save(map, glue("{output_dir}/{region}.png"))
+}
 ```
 
